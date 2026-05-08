@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>FinTrack Web — Pengatur Keuangan Pribadi</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <h1>💸 FinTrack Web</h1>
+      <p class="subtitle">Kelola uang masuk & keluar — kategori sesuai kebutuhanmu</p>
+    </header>
+
+    <!-- Dashboard Ringkasan (3 Cards) -->
+    <div class="dashboard">
+      <div class="card card-balance">
+        <h3>💰 Total Saldo</h3>
+        <p class="amount" id="totalBalance">Rp0</p>
+      </div>
+      <div class="card card-income">
+        <h3>📈 Total Pemasukan</h3>
+        <p class="amount" id="totalIncome">Rp0</p>
+      </div>
+      <div class="card card-expense">
+        <h3>📉 Total Pengeluaran</h3>
+        <p class="amount" id="totalExpense">Rp0</p>
+      </div>
+    </div>
+
+    <!-- Form Tambah / Edit Transaksi -->
+    <div class="form-card">
+      <h2>✏️ Tambah / Edit Transaksi</h2>
+      <form id="transactionForm">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Nama Transaksi</label>
+            <input type="text" id="transactionName" placeholder="Misal: Beli Kopi" required>
+          </div>
+          <div class="form-group">
+            <label>Nominal (IDR)</label>
+            <input type="number" id="transactionAmount" placeholder="0" min="0" step="1000" required>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Tipe</label>
+            <select id="transactionType" required>
+              <option value="expense">💸 Pengeluaran</option>
+              <option value="income">💰 Pemasukan</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Kategori</label>
+            <div class="category-select-wrapper">
+              <select id="transactionCategory" required></select>
+              <button type="button" id="openCategoryModalBtn" class="btn-small">+ Kategori Baru</button>
+            </div>
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" id="submitBtn">➕ Tambah Transaksi</button>
+        <button type="button" class="btn-secondary" id="cancelEditBtn" style="display: none;">❌ Batal Edit</button>
+      </form>
+    </div>
+
+    <!-- Daftar Transaksi dalam Tabel -->
+    <div class="transactions-section">
+      <h2>📋 Riwayat Transaksi</h2>
+      <div class="table-wrapper">
+        <table id="transactionTable">
+          <thead>
+            <tr>
+              <th>Nama</th>
+              <th>Nominal</th>
+              <th>Kategori</th>
+              <th>Tipe</th>
+              <th>Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="transactionTableBody">
+            <tr><td colspan="5" class="empty-row">Belum ada transaksi. Tambahkan sekarang!</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal untuk Tambah Kategori Baru -->
+  <div id="categoryModal" class="modal">
+    <div class="modal-content">
+      <span class="close-modal">&times;</span>
+      <h3>🏷️ Tambah Kategori Baru</h3>
+      <input type="text" id="newCategoryName" placeholder="Contoh: Scouting, Networking, Skripsi" autocomplete="off">
+      <button id="saveCategoryBtn" class="btn-primary">Simpan Kategori</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
