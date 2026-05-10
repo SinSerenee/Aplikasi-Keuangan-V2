@@ -177,4 +177,3 @@ Didistribusikan di bawah Lisensi MIT. Lihat file `LICENSE` untuk informasi lebih
 
 > Dibuat dengan ☕ dan terminal di Linux Mint XFCE.  
 > *“Keep track, stay wealthy!”*
-```
