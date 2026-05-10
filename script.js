@@ -1,344 +1,623 @@
 // ========================
-//  DATA & STORAGE (localStorage)
+// KONFIGURASI SUPABASE
 // ========================
+const supabaseUrl = 'https://sowkixwgtgdzfjmoerxq.supabase.co';
+const supabaseKey = 'sb_publishable_zLfRnz9bTAD0W4lOKIFtmg_oflJNuPq';
+const supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
 
-// Kunci untuk menyimpan data di localStorage
-const STORAGE_TRANSACTIONS = 'fintrack_transactions';
-const STORAGE_CATEGORIES = 'fintrack_categories';
-
-// Data default kategori (akan dipakai jika belum ada data)
-const DEFAULT_CATEGORIES = ['Makanan', 'Transportasi', 'Belanja', 'Hiburan', 'Kesehatan', 'Pendidikan', 'Lainnya'];
-
-// Data default contoh transaksi (biar tidak kosong saat pertama kali)
-const DEFAULT_TRANSACTIONS = [
-  { id: '1', name: 'Makan Siang', amount: 35000, type: 'expense', category: 'Makanan' },
-  { id: '2', name: 'Gaji Bulanan', amount: 5000000, type: 'income', category: 'Lainnya' },
-  { id: '3', name: 'Bensin', amount: 50000, type: 'expense', category: 'Transportasi' },
-];
-
-// Variabel global untuk menyimpan data selama sesi (sinkron dengan localStorage)
-let transactions = [];
+// ========================
+// STATE GLOBAL
+// ========================
+let currentUser = null;
 let categories = [];
-
-// Variabel untuk menandai mode edit (null jika bukan edit)
-let editId = null;
-
-// ========================
-//  FUNGSI BANTU (Load & Save localStorage)
-// ========================
-
-/** Load data dari localStorage, jika kosong maka gunakan default */
-function loadData() {
-  // Ambil transaksi
-  const storedTransactions = localStorage.getItem(STORAGE_TRANSACTIONS);
-  if (storedTransactions) {
-    transactions = JSON.parse(storedTransactions);
-  } else {
-    transactions = [...DEFAULT_TRANSACTIONS];
-    saveTransactions();
-  }
-
-  // Ambil kategori
-  const storedCategories = localStorage.getItem(STORAGE_CATEGORIES);
-  if (storedCategories) {
-    categories = JSON.parse(storedCategories);
-  } else {
-    categories = [...DEFAULT_CATEGORIES];
-    saveCategories();
-  }
-}
-
-/** Simpan transaksi ke localStorage */
-function saveTransactions() {
-  localStorage.setItem(STORAGE_TRANSACTIONS, JSON.stringify(transactions));
-}
-
-/** Simpan daftar kategori ke localStorage */
-function saveCategories() {
-  localStorage.setItem(STORAGE_CATEGORIES, JSON.stringify(categories));
-}
+let editingId = null;
+let expenseChart = null;
 
 // ========================
-//  FUNGSI RENDER UI (Dashboard, Tabel, Dropdown)
-// ========================
-
-/** Hitung total pemasukan, pengeluaran, dan saldo, lalu update 3 card */
-function updateDashboard() {
-  let totalIncome = 0;
-  let totalExpense = 0;
-
-  transactions.forEach(tr => {
-    if (tr.type === 'income') {
-      totalIncome += tr.amount;
-    } else {
-      totalExpense += tr.amount;
-    }
-  });
-
-  const balance = totalIncome - totalExpense;
-
-  // Format mata uang Rupiah (tanpa desimal)
-  const formatRupiah = (angka) => {
-    return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(angka);
-  };
-
-  document.getElementById('totalBalance').innerText = formatRupiah(balance);
-  document.getElementById('totalIncome').innerText = formatRupiah(totalIncome);
-  document.getElementById('totalExpense').innerText = formatRupiah(totalExpense);
-}
-
-/** Menampilkan tabel transaksi */
-function renderTable() {
-  const tbody = document.getElementById('transactionTableBody');
-  if (!transactions.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty-row">✨ Belum ada transaksi. Yuk tambah!</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = '';
-  transactions.forEach(tr => {
-    const row = document.createElement('tr');
-    // Format nominal
-    const formattedAmount = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(tr.amount);
-    const typeLabel = tr.type === 'income' ? '💰 Pemasukan' : '💸 Pengeluaran';
-    const typeClass = tr.type === 'income' ? 'income-text' : 'expense-text'; // untuk styling opsional
-
-    row.innerHTML = `
-      <td>${escapeHtml(tr.name)}</td>
-      <td class="${typeClass}">${formattedAmount}</td>
-      <td>${escapeHtml(tr.category)}</td>
-      <td>${typeLabel}</td>
-      <td>
-        <button class="btn-edit" data-id="${tr.id}">✏️ Edit</button>
-        <button class="btn-delete" data-id="${tr.id}">🗑️ Hapus</button>
-      </td>
-    `;
-    tbody.appendChild(row);
-  });
-
-  // Pasang event listener untuk tombol edit & hapus (event delegation lebih aman)
-  document.querySelectorAll('.btn-edit').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const id = btn.getAttribute('data-id');
-      editTransactionById(id);
-    });
-  });
-
-  document.querySelectorAll('.btn-delete').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const id = btn.getAttribute('data-id');
-      deleteTransactionById(id);
-    });
-  });
-}
-
-/** Mengisi dropdown kategori di form */
-function populateCategoryDropdown() {
-  const select = document.getElementById('transactionCategory');
-  if (!select) return;
-  select.innerHTML = '';
-  categories.forEach(cat => {
-    const option = document.createElement('option');
-    option.value = cat;
-    option.textContent = cat;
-    select.appendChild(option);
-  });
-}
-
-/** Render semua komponen UI yang perlu di-refresh setelah data berubah */
-function refreshUI() {
-  updateDashboard();
-  renderTable();
-  populateCategoryDropdown();
-}
-
-// ========================
-//  FUNGSI MANAJEMEN TRANSAKSI (CRUD)
-// ========================
-
-/** Menambah transaksi baru */
-function addTransaction(name, amount, type, category) {
-  const newTransaction = {
-    id: Date.now().toString(), // ID unik berdasarkan timestamp
-    name: name.trim(),
-    amount: Number(amount),
-    type: type,
-    category: category
-  };
-  transactions.push(newTransaction);
-  saveTransactions();
-  refreshUI();
-}
-
-/** Mengupdate transaksi yang sudah ada (edit) */
-function updateTransaction(id, name, amount, type, category) {
-  const index = transactions.findIndex(t => t.id === id);
-  if (index !== -1) {
-    transactions[index] = {
-      id: id,
-      name: name.trim(),
-      amount: Number(amount),
-      type: type,
-      category: category
-    };
-    saveTransactions();
-    refreshUI();
-  }
-}
-
-/** Menghapus transaksi berdasarkan ID */
-function deleteTransactionById(id) {
-  if (confirm('Yakin ingin menghapus transaksi ini?')) {
-    transactions = transactions.filter(t => t.id !== id);
-    saveTransactions();
-    refreshUI();
-    // Jika sedang dalam mode edit dan transaksi yang diedit dihapus, batalkan edit
-    if (editId === id) {
-      resetFormToAddMode();
-    }
-  }
-}
-
-/** Mengisi form dengan data transaksi untuk diedit */
-function editTransactionById(id) {
-  const transaction = transactions.find(t => t.id === id);
-  if (!transaction) return;
-
-  editId = id;
-  // Isi form
-  document.getElementById('transactionName').value = transaction.name;
-  document.getElementById('transactionAmount').value = transaction.amount;
-  document.getElementById('transactionType').value = transaction.type;
-  document.getElementById('transactionCategory').value = transaction.category;
-
-  // Ubah tampilan tombol
-  const submitBtn = document.getElementById('submitBtn');
-  const cancelBtn = document.getElementById('cancelEditBtn');
-  submitBtn.textContent = '✏️ Update Transaksi';
-  cancelBtn.style.display = 'inline-block';
-}
-
-/** Kembalikan form ke mode tambah (batal edit) */
-function resetFormToAddMode() {
-  editId = null;
-  document.getElementById('transactionForm').reset();
-  const submitBtn = document.getElementById('submitBtn');
-  const cancelBtn = document.getElementById('cancelEditBtn');
-  submitBtn.textContent = '➕ Tambah Transaksi';
-  cancelBtn.style.display = 'none';
-}
-
-// ========================
-//  FUNGSI KATEGORI KUSTOM
-// ========================
-
-/** Menambah kategori baru (tidak boleh duplikat) */
-function addNewCategory(categoryName) {
-  const trimmed = categoryName.trim();
-  if (trimmed === '') {
-    alert('Nama kategori tidak boleh kosong!');
-    return false;
-  }
-  if (categories.includes(trimmed)) {
-    alert(`Kategori "${trimmed}" sudah ada!`);
-    return false;
-  }
-  categories.push(trimmed);
-  saveCategories();
-  populateCategoryDropdown(); // update dropdown
-  return true;
-}
-
-// ========================
-//  EVENT HANDLER & MODAL
-// ========================
-
-/** Menangani submit form (tambah/edit) */
-function handleFormSubmit(event) {
-  event.preventDefault();
-  const name = document.getElementById('transactionName').value;
-  const amount = document.getElementById('transactionAmount').value;
-  const type = document.getElementById('transactionType').value;
-  const category = document.getElementById('transactionCategory').value;
-
-  if (!name || !amount || amount <= 0) {
-    alert('Isi nama transaksi dan nominal (lebih dari 0)!');
-    return;
-  }
-
-  if (editId) {
-    // Mode edit
-    updateTransaction(editId, name, amount, type, category);
-    resetFormToAddMode();
-  } else {
-    // Mode tambah
-    addTransaction(name, amount, type, category);
-    document.getElementById('transactionForm').reset(); // bersihkan form
-  }
-}
-
-/** Setup modal untuk tambah kategori */
-function setupCategoryModal() {
-  const modal = document.getElementById('categoryModal');
-  const openBtn = document.getElementById('openCategoryModalBtn');
-  const closeSpan = document.querySelector('.close-modal');
-  const saveBtn = document.getElementById('saveCategoryBtn');
-  const newCategoryInput = document.getElementById('newCategoryName');
-
-  // Buka modal
-  openBtn.onclick = () => {
-    modal.style.display = 'flex';
-    newCategoryInput.value = '';
-    newCategoryInput.focus();
-  };
-
-  // Tutup modal
-  const closeModal = () => {
-    modal.style.display = 'none';
-  };
-  closeSpan.onclick = closeModal;
-  window.onclick = (e) => {
-    if (e.target === modal) closeModal();
-  };
-
-  // Simpan kategori baru
-  saveBtn.onclick = () => {
-    const newCat = newCategoryInput.value;
-    if (addNewCategory(newCat)) {
-      closeModal();
-      // Optional: kasih feedback sukses
-    }
-  };
-}
-
-// ========================
-//  UTILITY: Escape HTML (mencegah XSS)
+// UTILITY FUNCTIONS
 // ========================
 function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/[&<>]/g, function(m) {
-    if (m === '&') return '&amp;';
-    if (m === '<') return '&lt;';
-    if (m === '>') return '&gt;';
-    return m;
-  });
+    if (!str) return '';
+    return str.replace(/[&<>]/g, function(m) {
+        if (m === '&') return '&amp;';
+        if (m === '<') return '&lt;';
+        if (m === '>') return '&gt;';
+        return m;
+    });
+}
+
+function formatRupiah(val) {
+    return new Intl.NumberFormat('id-ID', {
+        style: 'currency',
+        currency: 'IDR',
+        minimumFractionDigits: 0
+    }).format(val);
 }
 
 // ========================
-//  INISIALISASI SAAT HALAMAN LOAD
+// CEK SESSION LOGIN
 // ========================
-document.addEventListener('DOMContentLoaded', () => {
-  loadData();              // baca dari localStorage atau set default
-  refreshUI();            // tampilkan dashboard, tabel, dropdown
-  setupCategoryModal();   // siapkan modal kategori
+async function checkSession() {
+    console.log('🔍 Mengecek session...');
+    const { data: { session }, error } = await supabaseClient.auth.getSession();
+    
+    if (error) {
+        console.error('❌ Error cek session:', error);
+        return false;
+    }
+    
+    if (session) {
+        currentUser = session.user;
+        console.log('✅ User sudah login:', currentUser.email);
+        await loadUserProfile();
+        await loadUserCategories();
+        await renderTable();
+        showAppSection();
+        return true;
+    } else {
+        showAuthSection();
+        return false;
+    }
+}
 
-  // Pasang event listener form
-  const form = document.getElementById('transactionForm');
-  form.addEventListener('submit', handleFormSubmit);
+// ========================
+// LOAD USER PROFILE
+// ========================
+async function loadUserProfile() {
+    if (!currentUser) return;
+    
+    const { data, error } = await supabaseClient
+        .from('user_profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+    
+    if (error) {
+        console.error('❌ Error load profile:', error);
+        return;
+    }
+    
+    if (data) {
+        document.getElementById('userName').innerText = data.full_name || currentUser.email;
+        
+        const userAvatar = document.getElementById('userAvatar');
+        if (userAvatar && data.avatar_url) {
+            userAvatar.src = data.avatar_url + '?t=' + Date.now();
+        } else if (userAvatar) {
+            userAvatar.src = 'https://ui-avatars.com/api/?name=' + (data?.full_name?.[0] || 'U') + '&background=8b5cf6&color=fff';
+        }
+        
+        currentUser.profile = data;
+    } else {
+        const defaultName = currentUser.email.split('@')[0];
+        await supabaseClient
+            .from('user_profiles')
+            .insert([{
+                id: currentUser.id,
+                full_name: defaultName,
+                avatar_url: null
+            }]);
+        
+        document.getElementById('userName').innerText = defaultName;
+        currentUser.profile = { full_name: defaultName, avatar_url: null };
+    }
+}
 
-  // Tombol "Batal Edit"
-  const cancelBtn = document.getElementById('cancelEditBtn');
-  cancelBtn.addEventListener('click', () => {
-    resetFormToAddMode();
-  });
+// ========================
+// UPDATE USER PROFILE
+// ========================
+async function updateUserProfile(fullName, avatarFile) {
+    if (!currentUser) return false;
+    
+    let avatarUrl = currentUser.profile?.avatar_url || null;
+    
+    if (avatarFile) {
+        const fileExt = avatarFile.name.split('.').pop();
+        const fileName = `${currentUser.id}/avatar_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabaseClient.storage
+            .from('avatars')
+            .upload(fileName, avatarFile, { upsert: true });
+        
+        if (uploadError) {
+            alert('Gagal upload avatar: ' + uploadError.message);
+            return false;
+        }
+        
+        const { data: urlData } = supabaseClient.storage
+            .from('avatars')
+            .getPublicUrl(fileName);
+        
+        avatarUrl = urlData.publicUrl;
+    }
+    
+    const updateData = { full_name: fullName };
+    if (avatarUrl) updateData.avatar_url = avatarUrl;
+    
+    const { error } = await supabaseClient
+        .from('user_profiles')
+        .update(updateData)
+        .eq('id', currentUser.id);
+    
+    if (error) {
+        alert('Gagal update profil: ' + error.message);
+        return false;
+    }
+    
+    await loadUserProfile();
+    alert('✅ Profil berhasil diupdate!');
+    return true;
+}
+
+// ========================
+// CATEGORIES
+// ========================
+async function loadUserCategories() {
+    if (!currentUser) return;
+    
+    const { data, error } = await supabaseClient
+        .from('user_categories')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('name');
+    
+    if (error) {
+        console.error('Error load categories:', error);
+        return;
+    }
+    
+    if (data && data.length > 0) {
+        categories = data.map(cat => cat.name);
+    } else {
+        categories = ['Makanan', 'Transportasi', 'Belanja', 'Hiburan', 'Kesehatan', 'Pendidikan'];
+        await saveUserCategories();
+    }
+    
+    populateCategoryDropdown();
+}
+
+async function saveUserCategories() {
+    if (!currentUser) return;
+    
+    await supabaseClient
+        .from('user_categories')
+        .delete()
+        .eq('user_id', currentUser.id);
+    
+    const categoriesToInsert = categories.map(name => ({
+        user_id: currentUser.id,
+        name: name
+    }));
+    
+    if (categoriesToInsert.length > 0) {
+        await supabaseClient.from('user_categories').insert(categoriesToInsert);
+    }
+}
+
+async function addNewCategory(categoryName) {
+    const trimmed = categoryName.trim();
+    if (trimmed === '') {
+        alert('Nama kategori tidak boleh kosong!');
+        return false;
+    }
+    
+    if (categories.includes(trimmed)) {
+        alert(`Kategori "${trimmed}" sudah ada!`);
+        return false;
+    }
+    
+    categories.push(trimmed);
+    await saveUserCategories();
+    populateCategoryDropdown();
+    return true;
+}
+
+function populateCategoryDropdown() {
+    const select = document.getElementById('transactionCategory');
+    if (!select) return;
+    
+    select.innerHTML = '';
+    categories.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat;
+        option.textContent = cat;
+        select.appendChild(option);
+    });
+}
+
+// ========================
+// RENDER TABLE & DASHBOARD
+// ========================
+async function renderTable() {
+    if (!currentUser) return;
+    
+    const tbody = document.getElementById('transactionTableBody');
+    if (!tbody) return;
+    
+    const { data: transactions, error } = await supabaseClient
+        .from('transactions')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .order('created_at', { ascending: false });
+    
+    if (error) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-row">Gagal memuat data: ${error.message}</td></tr>`;
+        return;
+    }
+    
+    if (!transactions || transactions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Belum ada transaksi. Tambahkan sekarang!</td></tr>';
+        updateDashboard([]);
+        updateChart([]);
+        return;
+    }
+    
+    let html = '';
+    transactions.forEach(tr => {
+        html += `
+            <tr>
+                <td>${escapeHtml(tr.name)}</td>
+                <td>${formatRupiah(tr.amount)}</td>
+                <td>${escapeHtml(tr.category || '-')}</td>
+                <td>${tr.type === 'income' ? '💰 Pemasukan' : '💸 Pengeluaran'}</td>
+                <td>${escapeHtml(tr.note?.substring(0, 30) || '-')}</td>
+                <td>
+                    <button class="btn-edit" onclick="editTransaction('${tr.id}')">✏️ Edit</button>
+                    <button class="btn-delete" onclick="deleteTransaction('${tr.id}')">🗑️ Hapus</button>
+                 </td>
+            </tr>
+        `;
+    });
+    tbody.innerHTML = html;
+    updateDashboard(transactions);
+    updateChart(transactions);
+}
+
+function updateDashboard(transactions) {
+    let totalIncome = 0;
+    let totalExpense = 0;
+    
+    transactions.forEach(tr => {
+        if (tr.type === 'income') totalIncome += tr.amount;
+        else totalExpense += tr.amount;
+    });
+    
+    document.getElementById('totalBalance').innerText = formatRupiah(totalIncome - totalExpense);
+    document.getElementById('totalIncome').innerText = formatRupiah(totalIncome);
+    document.getElementById('totalExpense').innerText = formatRupiah(totalExpense);
+}
+
+function updateChart(transactions) {
+    const expenses = transactions.filter(tr => tr.type === 'expense');
+    const categoryMap = new Map();
+    
+    expenses.forEach(exp => {
+        const cat = exp.category || 'Lainnya';
+        categoryMap.set(cat, (categoryMap.get(cat) || 0) + exp.amount);
+    });
+    
+    if (expenseChart) expenseChart.destroy();
+    
+    const ctx = document.getElementById('expenseChart').getContext('2d');
+    expenseChart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: Array.from(categoryMap.keys()),
+            datasets: [{
+                data: Array.from(categoryMap.values()),
+                backgroundColor: ['#ff6384', '#36a2eb', '#ffce56', '#4bc0c0', '#9966ff', '#ff9f40', '#c9cbcf', '#8b5cf6']
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#eef2ff' } }
+            }
+        }
+    });
+}
+
+// ========================
+// CRUD TRANSAKSI
+// ========================
+async function addTransaction(name, amount, type, category, note) {
+    const { error } = await supabaseClient
+        .from('transactions')
+        .insert([{
+            user_id: currentUser.id,
+            name: name.trim(),
+            amount: Number(amount),
+            type: type,
+            category: category,
+            note: note || null,
+            created_at: new Date().toISOString()
+        }]);
+    
+    if (error) {
+        alert('Gagal menambah transaksi: ' + error.message);
+        return false;
+    }
+    return true;
+}
+
+async function updateTransaction(id, name, amount, type, category, note) {
+    const { error } = await supabaseClient
+        .from('transactions')
+        .update({
+            name: name.trim(),
+            amount: Number(amount),
+            type: type,
+            category: category,
+            note: note || null
+        })
+        .eq('id', id)
+        .eq('user_id', currentUser.id);
+    
+    if (error) {
+        alert('Gagal mengupdate transaksi: ' + error.message);
+        return false;
+    }
+    return true;
+}
+
+window.deleteTransaction = async function(id) {
+    if (!confirm('Yakin ingin menghapus transaksi ini?')) return;
+    
+    const { error } = await supabaseClient
+        .from('transactions')
+        .delete()
+        .eq('id', id)
+        .eq('user_id', currentUser.id);
+    
+    if (error) {
+        alert('Gagal menghapus transaksi: ' + error.message);
+    } else {
+        await renderTable();
+        resetFormToAddMode();
+    }
+};
+
+window.editTransaction = async function(id) {
+    const { data, error } = await supabaseClient
+        .from('transactions')
+        .select('*')
+        .eq('id', id)
+        .eq('user_id', currentUser.id)
+        .single();
+    
+    if (error || !data) return;
+    
+    editingId = id;
+    document.getElementById('transactionName').value = data.name;
+    document.getElementById('transactionAmount').value = data.amount;
+    document.getElementById('transactionType').value = data.type;
+    document.getElementById('transactionCategory').value = data.category || categories[0];
+    document.getElementById('transactionNote').value = data.note || '';
+    
+    document.getElementById('submitBtn').textContent = '✏️ Update Transaksi';
+    document.getElementById('cancelEditBtn').style.display = 'inline-block';
+};
+
+function resetFormToAddMode() {
+    editingId = null;
+    document.getElementById('transactionForm').reset();
+    document.getElementById('submitBtn').textContent = '➕ Tambah Transaksi';
+    document.getElementById('cancelEditBtn').style.display = 'none';
+}
+
+async function handleFormSubmit(event) {
+    event.preventDefault();
+    
+    const name = document.getElementById('transactionName').value;
+    const amount = document.getElementById('transactionAmount').value;
+    const type = document.getElementById('transactionType').value;
+    const category = document.getElementById('transactionCategory').value;
+    const note = document.getElementById('transactionNote').value;
+    
+    if (!name || !amount || amount <= 0) {
+        alert('Isi nama transaksi dan nominal (lebih dari 0)!');
+        return;
+    }
+    
+    let success = editingId 
+        ? await updateTransaction(editingId, name, amount, type, category, note)
+        : await addTransaction(name, amount, type, category, note);
+    
+    if (success) {
+        await renderTable();
+        resetFormToAddMode();
+    }
+}
+
+// ========================
+// AUTHENTICATION
+// ========================
+async function handleLogin(email, password) {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email: email,
+        password: password
+    });
+    
+    if (error) {
+        alert('Login gagal: ' + error.message);
+        return false;
+    }
+    
+    currentUser = data.user;
+    await loadUserProfile();
+    await loadUserCategories();
+    await renderTable();
+    showAppSection();
+    return true;
+}
+
+async function handleRegister(email, password, fullName) {
+    const { error } = await supabaseClient.auth.signUp({
+        email: email,
+        password: password,
+        options: { data: { full_name: fullName } }
+    });
+    
+    if (error) {
+        alert('Registrasi gagal: ' + error.message);
+        return false;
+    }
+    
+    alert('✅ Registrasi berhasil! Silakan login.');
+    return true;
+}
+
+async function handleLogout() {
+    await supabaseClient.auth.signOut();
+    currentUser = null;
+    categories = [];
+    showAuthSection();
+}
+
+function showAppSection() {
+    document.getElementById('authSection').style.display = 'none';
+    document.getElementById('appSection').style.display = 'block';
+}
+
+function showAuthSection() {
+    document.getElementById('authSection').style.display = 'flex';
+    document.getElementById('appSection').style.display = 'none';
+}
+
+// ========================
+// MODALS
+// ========================
+function setupCategoryModal() {
+    const modal = document.getElementById('categoryModal');
+    const openBtn = document.getElementById('openCategoryModalBtn');
+    const closeSpan = document.querySelector('#categoryModal .close-modal');
+    const saveBtn = document.getElementById('saveCategoryBtn');
+    const input = document.getElementById('newCategoryName');
+    
+    if (!modal || !openBtn) return;
+    
+    openBtn.onclick = () => {
+        modal.style.display = 'flex';
+        input.value = '';
+        input.focus();
+    };
+    
+    const close = () => modal.style.display = 'none';
+    if (closeSpan) closeSpan.onclick = close;
+    window.onclick = (e) => { if (e.target === modal) close(); };
+    
+    saveBtn.onclick = async () => {
+        if (await addNewCategory(input.value)) {
+            close();
+            alert(`Kategori "${input.value}" berhasil ditambahkan!`);
+        }
+    };
+}
+
+function setupProfileModal() {
+    const modal = document.getElementById('profileModal');
+    const userAvatar = document.getElementById('userAvatar');
+    const closeSpan = document.getElementById('closeProfileModal');
+    const saveBtn = document.getElementById('saveProfileBtn');
+    const upload = document.getElementById('avatarUpload');
+    const preview = document.getElementById('profileAvatarPreview');
+    const nameInput = document.getElementById('profileFullName');
+    
+    if (!modal || !userAvatar) return;
+    
+    userAvatar.onclick = () => {
+        modal.style.display = 'flex';
+        nameInput.value = currentUser.profile?.full_name || '';
+        preview.src = currentUser.profile?.avatar_url || 'https://ui-avatars.com/api/?name=' + (currentUser.profile?.full_name?.[0] || 'U') + '&background=8b5cf6&color=fff&size=100';
+        upload.value = '';
+    };
+    
+    const close = () => modal.style.display = 'none';
+    if (closeSpan) closeSpan.onclick = close;
+    window.onclick = (e) => { if (e.target === modal) close(); };
+    
+    upload.onchange = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => { preview.src = event.target.result; };
+            reader.readAsDataURL(file);
+        }
+    };
+    
+    saveBtn.onclick = async () => {
+        await updateUserProfile(nameInput.value, upload.files[0]);
+        close();
+    };
+}
+
+function setupAuthTabs() {
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    const switchToRegister = document.getElementById('switchToRegister');
+    const switchToLogin = document.getElementById('switchToLogin');
+    
+    const showLogin = () => {
+        loginTab.classList.add('active');
+        registerTab.classList.remove('active');
+        loginForm.classList.add('active');
+        registerForm.classList.remove('active');
+    };
+    
+    const showRegister = () => {
+        registerTab.classList.add('active');
+        loginTab.classList.remove('active');
+        registerForm.classList.add('active');
+        loginForm.classList.remove('active');
+    };
+    
+    loginTab.onclick = showLogin;
+    registerTab.onclick = showRegister;
+    if (switchToRegister) switchToRegister.onclick = showRegister;
+    if (switchToLogin) switchToLogin.onclick = showLogin;
+    
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await handleLogin(
+            document.getElementById('loginEmail').value,
+            document.getElementById('loginPassword').value
+        );
+    });
+    
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const password = document.getElementById('registerPassword').value;
+        const confirm = document.getElementById('registerConfirmPassword').value;
+        
+        if (password !== confirm) {
+            alert('Password dan konfirmasi password tidak cocok!');
+            return;
+        }
+        
+        await handleRegister(
+            document.getElementById('registerEmail').value,
+            password,
+            document.getElementById('registerName').value
+        );
+        showLogin();
+    });
+}
+
+// ========================
+// INITIALIZE
+// ========================
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('🚀 FinTrack V3 - by @cceasenn');
+    
+    setupCategoryModal();
+    setupProfileModal();
+    setupAuthTabs();
+    
+    document.getElementById('transactionForm')?.addEventListener('submit', handleFormSubmit);
+    document.getElementById('cancelEditBtn')?.addEventListener('click', resetFormToAddMode);
+    document.getElementById('logoutBtn')?.addEventListener('click', handleLogout);
+    
+    await checkSession();
 });
